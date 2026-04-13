@@ -12,11 +12,13 @@ pipeline {
         stage('Run E2E Tests') {
             steps {
                 script {
-                    // Update: Target the complete PRISM Master validation flow
-                    def status = bat(script: 'npx playwright test tests/PRISM/test/verifyUploadedInvoices.spec.js', returnStatus: true)
-                    
+                    def status = bat(
+                        script: 'npx playwright test test/verifyUploadedInvoices.spec.js',
+                        returnStatus: true
+                    )
+
                     if (status != 0) {
-                        echo "Tests failed, but continuing to generate reports..."
+                        echo "Tests failed, but continuing..."
                         currentBuild.result = 'UNSTABLE'
                     }
                 }
@@ -26,16 +28,10 @@ pipeline {
 
     post {
         always {
-            echo 'Generating Playwright HTML reports...'
-
             publishHTML(target: [
                 reportDir: 'playwright-report',
                 reportFiles: 'index.html',
-                reportName: 'Playwright HTML Report',
-                alwaysLinkToLastBuild: true,
-                keepAll: true,
-                allowMissing: true,
-                linkRelative: false
+                reportName: 'Playwright HTML Report'
             ])
         }
     }
