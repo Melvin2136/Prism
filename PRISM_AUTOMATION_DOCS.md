@@ -17,13 +17,14 @@ tests/PRISM/
 │   ├── DashboardPage.js          # Dashboard + sidebar navigation
 │   ├── UploadInvoicePage.js      # Upload Invoice form
 │   ├── ReviewInvoicePage.js      # Review Invoices table & job view
-│   └── InvoiceValidationPage.js  # Invoice review modal (right panel)
+│   └── InvoiceValidationPage.js  # Invoice review modal (right panel) + PDF cross-verify
 ├── test/
 │   ├── uploadInvoice.spec.js     # TC01: Upload-only test
-│   └── verifyUploadedInvoices.spec.js  # TC01_Master: Full E2E test
+│   └── verifyUploadedInvoices.spec.js  # TC01_Master: Full E2E test with PDF cross-verification
 ├── utils/
 │   ├── fileHelper.js             # Dynamic file loader from folder
-│   └── pdfReader.js              # PDF text extraction utility
+│   ├── pdfReader.js              # PDF text extraction (pdf-parse wrapper)
+│   └── pdfFieldExtractor.js      # Regex-based field extractor + fuzzy match helper
 └── PRISM_AUTOMATION_DOCS.md      # This file
 
 tests/temp/                       # Place invoice PDFs here for upload

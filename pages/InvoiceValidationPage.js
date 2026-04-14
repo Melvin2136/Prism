@@ -252,6 +252,84 @@ class InvoiceValidationPage {
     await this.page.waitForTimeout(2000);
     console.log('Invoice marked as Rejected ❌');
   }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // PDF Cross-Verification
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Compares PRISM's auto-extracted field values (from the right panel)
+   * against values found in the original PDF text.
+   *
+   * Result for each field:
+   *   ✅ PDF MATCH      – PRISM value matches PDF text (fuzzy comparison)
+   *   ❌ PDF MISMATCH   – PRISM value differs from what was in the PDF
+   *   ⏭️  PDF NOT FOUND  – Field was not extractable from the PDF
+   *                       (scanned image / no text layer)
+   *
+   * NOTE: Mismatches are LOGGED only; the test is NOT failed by this method.
+   *
+   * @param {Map<string, string>} pdfFieldMap
+   *   Label → extracted-value map returned by pdfFieldExtractor.extractPDFFields()
+   * @param {{ isMatch: (a: string, b: string) => boolean }} [opts]
+   *   Optional fuzzy-match override (default: isMatch from pdfFieldExtractor).
+   * @returns {Promise<Array<{label, prismValue, pdfValue, result}>>}
+   */
+  async crossVerifyWithPDF(pdfFieldMap, opts = {}) {
+    const { isMatch } = opts.isMatch
+      ? opts
+      : require('../utils/pdfFieldExtractor');
+
+    const prismFields = await this.extractAllFieldStates();
+
+    const report = [];
+    let matchCount   = 0;
+    let mismatchCount = 0;
+    let notFoundCount = 0;
+
+    for (const field of prismFields) {
+      // Only cross-verify fields that PRISM has actually populated
+      if (!field.value) continue;
+
+      const pdfValue = pdfFieldMap.get(field.label) ?? null;
+
+      let result;
+      if (!pdfValue) {
+        result = 'PDF NOT FOUND';
+        notFoundCount++;
+      } else if (isMatch(field.value, pdfValue)) {
+        result = 'PDF MATCH ✅';
+        matchCount++;
+      } else {
+        result = 'PDF MISMATCH ❌';
+        mismatchCount++;
+      }
+
+      report.push({
+        label:      field.label,
+        prismValue: field.value,
+        pdfValue:   pdfValue ?? '—',
+        result,
+      });
+    }
+
+    // ── Pretty-print the report ───────────────────────────────────────────────
+    console.log('\n========= PDF Cross-Verification Report =========');
+    for (const r of report) {
+      const icon =
+        r.result.includes('MATCH ✅')   ? '✅' :
+        r.result.includes('MISMATCH')   ? '❌' : '⏭️ ';
+      console.log(
+        `  ${icon}  ${r.label}\n` +
+        `       PRISM : "${r.prismValue}"\n` +
+        `       PDF   : "${r.pdfValue}"`
+      );
+    }
+    console.log(`\n  Summary: ${matchCount} match(es) | ${mismatchCount} mismatch(es) | ${notFoundCount} not-found`);
+    console.log('=================================================\n');
+
+    return report;
+  }
 }
 
 module.exports = { InvoiceValidationPage };

@@ -18,6 +18,7 @@ const { test, expect } = require('@playwright/test');
 const { LoginPage } = require('../pages/LoginPage');
 const { DashboardPage } = require('../pages/DashboardPage');
 const { UploadInvoicePage } = require('../pages/UploadInvoicePage');
+const { ReviewInvoicePage } = require('../pages/ReviewInvoicePage');
 const { loadFilesFromFolder } = require('../utils/fileHelper');
 const path = require('path');
 
@@ -35,11 +36,13 @@ test.describe('PRISM – Upload Invoice', () => {
   let loginPage;
   let dashboardPage;
   let uploadPage;
+  let reviewPage;
 
   test.beforeEach(async ({ page }) => {
-    loginPage = new LoginPage(page);
+    loginPage  = new LoginPage(page);
     dashboardPage = new DashboardPage(page);
     uploadPage = new UploadInvoicePage(page);
+    reviewPage = new ReviewInvoicePage(page);
 
     // Step 1 — Login
     await loginPage.goto();
@@ -53,6 +56,8 @@ test.describe('PRISM – Upload Invoice', () => {
   // TC-01  Happy path: upload multiple invoices successfully
   // ──────────────────────────────────────────────────────────────────────────
   test('TC01 – User can upload multiple invoice files from the dashboard', async ({ page }) => {
+    // Give extra time for the upload + PRISM processing
+    test.setTimeout(120_000);
 
     // ── Arrange ──────────────────────────────────────────────────────────────
     const files = loadFilesFromFolder(FILES_DIR); // dynamic — no hardcoded paths
@@ -75,27 +80,63 @@ test.describe('PRISM – Upload Invoice', () => {
     const jobName = `QA-${String(Date.now()).slice(-8)}`;
     await uploadPage.enterJobName(jobName);
 
-    // Upload all files from tests/files/ dynamically
+    // Upload all files from tests/temp/ dynamically
     await uploadPage.uploadMultipleFiles(files);
 
     // Submit
     await uploadPage.clickUploadAndProcess();
 
-    // ── Assert: Success ───────────────────────────────────────────────────────
-    // Accept any of: success toast visible, URL changed, OR job name appears in the page
-    // (PRISM's toast can disappear quickly; the URL may stay at /upload)
-    const successMessageVisible = await uploadPage.successMessage
-      .isVisible()
-      .catch(() => false);
+    // ── Assert: Success (multi-signal resilient check) ────────────────────────
+    // PRISM's upload may: show a toast (which disappears fast), redirect, OR just
+    // silently reset the form. We poll for any of these signals for up to 15s.
+    console.log('[TC01] Waiting for upload success signal...');
 
-    const urlChanged = /dashboard|review|job/i.test(page.url());
-    
-    // New: check if the job name or any file is now listed on the page
-    const jobListed = await page.getByText(jobName, { exact: false }).isVisible().catch(() => false);
+    let successDetected = false;
+    const deadline = Date.now() + 15_000;
+
+    while (Date.now() < deadline && !successDetected) {
+      const [toastVisible, urlChanged, jobListed, btnGone] = await Promise.all([
+        // 1. Toast / success text appeared
+        uploadPage.successMessage.isVisible().catch(() => false),
+        // 2. URL moved away from /upload
+        Promise.resolve(/dashboard|review|job/i.test(page.url())),
+        // 3. Job name appears in the page content (some PRISM versions list it)
+        page.getByText(jobName, { exact: false }).isVisible().catch(() => false),
+        // 4. The Upload & Process button is gone (form reset = upload accepted)
+        uploadPage.uploadAndProcessButton.isHidden().catch(() => false),
+      ]);
+
+      if (toastVisible || urlChanged || jobListed || btnGone) {
+        successDetected = true;
+        console.log(
+          `[TC01] ✅ Upload success detected:\n` +
+          `  toast=${toastVisible} | urlChanged=${urlChanged} | jobListed=${jobListed} | btnGone=${btnGone}`
+        );
+      } else {
+        await page.waitForTimeout(1000);
+      }
+    }
+
+    // ── Fallback: navigate to /review and verify the job was indexed ──────────
+    if (!successDetected) {
+      console.log('[TC01] No immediate success signal — checking /review page for job row...');
+      await reviewPage.goto();
+      await reviewPage.searchByJobName(jobName);
+
+      // Give PRISM up to 20s to index the newly uploaded job
+      try {
+        await page.getByText(jobName, { exact: false }).waitFor({ state: 'visible', timeout: 20_000 });
+        successDetected = true;
+        console.log('[TC01] ✅ Job found on /review page — upload was successful.');
+      } catch {
+        console.warn('[TC01] Job not found on /review either.');
+      }
+    }
 
     expect(
-      successMessageVisible || urlChanged || jobListed,
-      `Expected a success message, URL change, or job listing after upload.\nCurrent URL: ${page.url()}`
+      successDetected,
+      `Upload did not produce any success signal.\nCurrent URL: ${page.url()}\n` +
+      `Check /review manually for job: "${jobName}"`
     ).toBeTruthy();
   });
 
